@@ -272,7 +272,6 @@ class vLLMClient:
         temperature=1.0,
         top_p=0.95,
         max_tokens=1024,
-        max_context_messages=20,  # Maximum number of messages to keep in context
     ):
         self.cache = Cache()
         self.model = model
@@ -280,25 +279,6 @@ class vLLMClient:
         self.temperature = temperature
         self.top_p = top_p
         self.max_tokens = max_tokens
-        self.max_context_messages = max_context_messages
-
-    def _truncate_context(self, payload: list[dict[str, str]]) -> list[dict[str, str]]:
-        """Truncate conversation history to fit within context limits.
-
-        Keeps:
-        - First message (system prompt)
-        - Last N messages (recent conversation)
-        """
-        if len(payload) <= self.max_context_messages:
-            return payload
-
-        # Keep system message (first) + last (max_context_messages - 1) messages
-        system_messages = [msg for msg in payload[:2] if msg.get("role") == "system"]
-        recent_messages = payload[-(self.max_context_messages - len(system_messages)):]
-
-        truncated = system_messages + recent_messages
-        print(f"[vLLMClient] Context truncated: {len(payload)} -> {len(truncated)} messages")
-        return truncated
 
     def inference(self, payload: list[dict[str, str]]) -> list[str]:
         if self.cache is not None:
@@ -306,13 +286,10 @@ class vLLMClient:
             if cache_result is not None:
                 return cache_result
 
-        # Truncate context if too long
-        truncated_payload = self._truncate_context(payload)
-
         client = OpenAI(api_key="EMPTY", base_url="http://10.201.135.228:8000/v1")
         try:
             response = client.chat.completions.create(
-                messages=truncated_payload,  # type: ignore
+                messages=payload,  # type: ignore
                 model=self.model,
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
