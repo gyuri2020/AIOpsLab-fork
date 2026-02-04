@@ -10,12 +10,14 @@ from clients.utils.templates import DOCS_SHELL_ONLY
 
 
 class vLLMAgent:
-    def __init__(self,
-                model="Qwen/Qwen2.5-Coder-3B-Instruct",
-                repetition_penalty=1.0,
-                temperature=1.0,
-                top_p=1.0,
-                max_tokens=1024):
+    def __init__(
+        self,
+        model="openai/gpt-oss-20b",
+        repetition_penalty=1.0,
+        temperature=1.0,
+        top_p=1.0,
+        max_tokens=1024,
+    ):
         self.history = []
 
         self.llm = vLLMClient(
@@ -29,13 +31,11 @@ class vLLMAgent:
     def init_context(self, problem_desc: str, instructions: str, apis: str):
         """Initialize the context for the agent."""
 
-        self.shell_api = self._filter_dict(
-            apis, lambda k, _: "exec_shell" in k)
+        self.shell_api = self._filter_dict(apis, lambda k, _: "exec_shell" in k)
         self.submit_api = self._filter_dict(apis, lambda k, _: "submit" in k)
 
-        def stringify_apis(apis): return "\n\n".join(
-            [f"{k}\n{v}" for k, v in apis.items()]
-        )
+        def stringify_apis(apis):
+            return "\n\n".join([f"{k}\n{v}" for k, v in apis.items()])
 
         self.system_message = DOCS_SHELL_ONLY.format(
             prob_desc=problem_desc,
@@ -76,22 +76,24 @@ if __name__ == "__main__":
 
     registry = ProblemRegistry()
     pids = registry.get_problem_ids()
-
-    for pid in pids:
-        agent = vLLMAgent() # Initialize the agent
+    sample_pids = pids[:4]
+    print(f"Running {len(sample_pids)} problems")
+    for pid in sample_pids:
+        print(f"Running problem {pid}")
+        agent = vLLMAgent()  # Initialize the agent
 
         orchestrator = Orchestrator()
-        orchestrator.register_agent(agent, name="Qwen2.5-Coder-3B-Instruct")
+        orchestrator.register_agent(agent, name="gpt-oss-20b")
         try:
-            print("*"*30)
+            print("*" * 30)
             print(f"Began processing pid {pid}.")
-            print("*"*30)
+            print("*" * 30)
             problem_desc, instructs, apis = orchestrator.init_problem(pid)
             agent.init_context(problem_desc, instructs, apis)
             asyncio.run(orchestrator.start_problem(max_steps=10))
-            print("*"*30)
+            print("*" * 30)
             print(f"Successfully processed pid {pid}.")
-            print("*"*30)
+            print("*" * 30)
 
         except Exception as e:
             print(f"Failed to process pid {pid}. Error: {e}")

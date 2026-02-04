@@ -7,6 +7,7 @@ import time
 import uuid
 import json
 import wandb
+from datetime import datetime
 from pydantic import BaseModel
 
 from aiopslab.paths import RESULTS_DIR
@@ -119,7 +120,16 @@ class Session:
         results_dir = self.results_dir if self.results_dir else RESULTS_DIR
         results_dir.mkdir(parents=True, exist_ok=True)
 
-        with open(results_dir / f"{self.session_id}_{self.start_time}.json", "w") as f:
+        # Format: YYMMDD_hhmm_{agent_name}_{problem_id}.json
+        timestamp = datetime.fromtimestamp(self.start_time).strftime("%y%m%d_%H%M")
+        agent_name = self.agent_name if self.agent_name else "unknown"
+        problem_id = self.pid if self.pid else "unknown"
+        # Sanitize names (remove invalid filename characters)
+        agent_name = agent_name.replace("/", "-").replace("\\", "-").replace(" ", "_")
+        problem_id = problem_id.replace("/", "-").replace("\\", "-").replace(" ", "_")
+        filename = f"{timestamp}_{agent_name}_{problem_id}.json"
+
+        with open(results_dir / filename, "w") as f:
             json.dump(self.to_dict(), f, indent=4)
 
     def to_wandb(self):

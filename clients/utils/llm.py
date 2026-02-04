@@ -14,7 +14,11 @@ from dataclasses import dataclass
 
 from groq import Groq
 from openai import OpenAI, AzureOpenAI
-from azure.identity import get_bearer_token_provider, AzureCliCredential, ManagedIdentityCredential
+from azure.identity import (
+    get_bearer_token_provider,
+    AzureCliCredential,
+    ManagedIdentityCredential,
+)
 
 from dotenv import load_dotenv
 
@@ -69,7 +73,13 @@ class Cache:
 class GPTClient:
     """Abstraction for OpenAI's GPT series model."""
 
-    def __init__(self, auth_type: str = "key", api_key: Optional[str] = None, azure_config_file: Optional[str] = None, use_cache: bool = True):
+    def __init__(
+        self,
+        auth_type: str = "key",
+        api_key: Optional[str] = None,
+        azure_config_file: Optional[str] = None,
+        use_cache: bool = True,
+    ):
         self.cache = Cache()
         self.client = self._setup_client(auth_type, api_key, azure_config_file)
 
@@ -81,24 +91,32 @@ class GPTClient:
                 api_version=azure_config_data.get("api_version"),
             )
 
-    def _setup_client(self, auth_type: str, api_key: Optional[str], azure_config_file: Optional[str]):
+    def _setup_client(
+        self, auth_type: str, api_key: Optional[str], azure_config_file: Optional[str]
+    ):
         azure_identity_opts = ["cli", "managed_identity"]
         if auth_type == "key":
             # TODO: support Azure OpenAI client.
             api_key = api_key or os.getenv("OPENAI_API_KEY")
             if not api_key:
-                raise ValueError("API key must be provided or set in OPENAI_API_KEY environment variable")
+                raise ValueError(
+                    "API key must be provided or set in OPENAI_API_KEY environment variable"
+                )
             return OpenAI(api_key=api_key)
         elif auth_type in azure_identity_opts:
             if not azure_config_file:
-                raise ValueError("Azure configuration file must be provided for access via managed identity.\n Check AIOpsLab/clients/configs/example_azure_config.yml for an example.")
+                raise ValueError(
+                    "Azure configuration file must be provided for access via managed identity.\n Check AIOpsLab/clients/configs/example_azure_config.yml for an example."
+                )
             azure_config = self._load_azure_config(azure_config_file)
             if auth_type == "cli":
                 credential = AzureCliCredential()
             elif auth_type == "managed_identity":
                 client_id = os.getenv("AZURE_CLIENT_ID")
                 if client_id is None:
-                    raise ValueError("Managed identity selected but AZURE_CLIENT_ID is not set.")
+                    raise ValueError(
+                        "Managed identity selected but AZURE_CLIENT_ID is not set."
+                    )
                 credential = ManagedIdentityCredential(client_id=client_id)
             token_provider = get_bearer_token_provider(
                 credential, "https://cognitiveservices.azure.com/.default"
@@ -106,10 +124,12 @@ class GPTClient:
             return AzureOpenAI(
                 api_version=azure_config.api_version,
                 azure_endpoint=azure_config.azure_endpoint,
-                azure_ad_token_provider=token_provider
+                azure_ad_token_provider=token_provider,
             )
         else:
-            raise ValueError("auth_type must be one of 'key', 'cli', or 'managed_identity'")
+            raise ValueError(
+                "auth_type must be one of 'key', 'cli', or 'managed_identity'"
+            )
 
     def inference(self, payload: list[dict[str, str]]) -> list[str]:
         if self.cache is not None:
@@ -156,8 +176,9 @@ class DeepSeekClient:
             if cache_result is not None:
                 return cache_result
 
-        client = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"),
-                        base_url="https://api.deepseek.com")
+        client = OpenAI(
+            api_key=os.getenv("DEEPSEEK_API_KEY"), base_url="https://api.deepseek.com"
+        )
         try:
             response = client.chat.completions.create(
                 messages=payload,  # type: ignore
@@ -192,8 +213,10 @@ class QwenClient:
             if cache_result is not None:
                 return cache_result
 
-        client = OpenAI(api_key=os.getenv("DASHSCOPE_API_KEY"),
-                        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1")
+        client = OpenAI(
+            api_key=os.getenv("DASHSCOPE_API_KEY"),
+            base_url="http://10.201.135.228:8000/v1",
+        )
         try:
             # TODO: Add constraints for the input context length
             response = client.chat.completions.create(
@@ -203,7 +226,7 @@ class QwenClient:
                 n=1,
                 timeout=60,
                 stop=[],
-                stream=True
+                stream=True,
             )
         except Exception as e:
             print(f"Exception: {repr(e)}")
@@ -219,7 +242,10 @@ class QwenClient:
                 print(chunk.usage)
             else:
                 delta = chunk.choices[0].delta
-                if hasattr(delta, 'reasoning_content') and delta.reasoning_content != None:
+                if (
+                    hasattr(delta, "reasoning_content")
+                    and delta.reasoning_content != None
+                ):
                     reasoning_content += delta.reasoning_content
                 else:
                     if delta.content != "" and is_answering is False:
@@ -239,18 +265,40 @@ class QwenClient:
 class vLLMClient:
     """Abstraction for local LLM models."""
 
-    def __init__(self,
-                 model="Qwen/Qwen2.5-Coder-3B-Instruct",
-                 repetition_penalty=1.0,
-                 temperature=1.0,
-                 top_p=0.95,
-                 max_tokens=1024):
+    def __init__(
+        self,
+        model="Qwen/Qwen2.5-Coder-3B-Instruct",
+        repetition_penalty=1.0,
+        temperature=1.0,
+        top_p=0.95,
+        max_tokens=1024,
+        max_context_messages=20,  # Maximum number of messages to keep in context
+    ):
         self.cache = Cache()
         self.model = model
         self.repetition_penalty = repetition_penalty
         self.temperature = temperature
         self.top_p = top_p
         self.max_tokens = max_tokens
+        self.max_context_messages = max_context_messages
+
+    def _truncate_context(self, payload: list[dict[str, str]]) -> list[dict[str, str]]:
+        """Truncate conversation history to fit within context limits.
+
+        Keeps:
+        - First message (system prompt)
+        - Last N messages (recent conversation)
+        """
+        if len(payload) <= self.max_context_messages:
+            return payload
+
+        # Keep system message (first) + last (max_context_messages - 1) messages
+        system_messages = [msg for msg in payload[:2] if msg.get("role") == "system"]
+        recent_messages = payload[-(self.max_context_messages - len(system_messages)):]
+
+        truncated = system_messages + recent_messages
+        print(f"[vLLMClient] Context truncated: {len(payload)} -> {len(truncated)} messages")
+        return truncated
 
     def inference(self, payload: list[dict[str, str]]) -> list[str]:
         if self.cache is not None:
@@ -258,10 +306,13 @@ class vLLMClient:
             if cache_result is not None:
                 return cache_result
 
-        client = OpenAI(api_key="EMPTY", base_url="http://localhost:8000/v1")
+        # Truncate context if too long
+        truncated_payload = self._truncate_context(payload)
+
+        client = OpenAI(api_key="EMPTY", base_url="http://10.201.135.228:8000/v1")
         try:
             response = client.chat.completions.create(
-                messages=payload,  # type: ignore
+                messages=truncated_payload,  # type: ignore
                 model=self.model,
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
@@ -269,7 +320,7 @@ class vLLMClient:
                 frequency_penalty=0.0,
                 presence_penalty=0.0,
                 n=1,
-                timeout=60,
+                timeout=120,  # Increased timeout for longer responses
                 stop=[],
             )
         except Exception as e:
@@ -301,7 +352,7 @@ class OpenRouterClient:
 
         client = OpenAI(
             api_key=os.getenv("OPENROUTER_API_KEY"),
-            base_url="https://openrouter.ai/api/v1"
+            base_url="https://openrouter.ai/api/v1",
         )
         try:
             response = client.chat.completions.create(
