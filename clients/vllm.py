@@ -1,10 +1,13 @@
+import argparse
 import asyncio
 import os
 import time
+from pathlib import Path
 
 import wandb
 from aiopslab.orchestrator import Orchestrator
 from aiopslab.orchestrator.problems.registry import ProblemRegistry
+from aiopslab.paths import RESULTS_DIR
 from clients.utils.llm import vLLMClient
 from clients.utils.templates import DOCS_SHELL_ONLY
 
@@ -67,6 +70,29 @@ class vLLMAgent:
 
 
 if __name__ == "__main__":
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(
+        description="Run vLLM agent for AIOpsLab evaluation"
+    )
+    parser.add_argument(
+        "--eval_id",
+        type=str,
+        default="test-v1",
+        help="Evaluation ID for this run (used as subdirectory name)",
+    )
+    parser.add_argument(
+        "--num_problems",
+        type=int,
+        default=10,
+        help="Number of problems to run (default: None)",
+    )
+    args = parser.parse_args()
+
+    # Create results subdirectory for this evaluation
+    results_dir = RESULTS_DIR / args.eval_id
+    results_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Results will be saved to: {results_dir}")
+
     # Load use_wandb from environment variable with a default of False
     use_wandb = os.getenv("USE_WANDB", "false").lower() == "true"
 
@@ -76,13 +102,16 @@ if __name__ == "__main__":
 
     registry = ProblemRegistry()
     pids = registry.get_problem_ids()
-    sample_pids = pids[:4]
+    if args.num_problems is None:
+        sample_pids = pids
+    else:
+        sample_pids = pids[: args.num_problems]
     print(f"Running {len(sample_pids)} problems")
     for pid in sample_pids:
         print(f"Running problem {pid}")
         agent = vLLMAgent()  # Initialize the agent
 
-        orchestrator = Orchestrator()
+        orchestrator = Orchestrator(results_dir=results_dir)
         orchestrator.register_agent(agent, name="gpt-oss-20b")
         try:
             print("*" * 30)
@@ -97,9 +126,11 @@ if __name__ == "__main__":
 
         except Exception as e:
             print(f"Failed to process pid {pid}. Error: {e}")
-            time.sleep(60)
+            print("Continuing to next problem...")
             continue
 
     if use_wandb:
         # Finish the wandb run
         wandb.finish()
+
+    print(f"\nEvaluation complete. Results saved in: {results_dir}")
